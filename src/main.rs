@@ -30,6 +30,7 @@ use std::{future::Future, pin::Pin, time::Instant};
 use lazy_static::lazy_static;
 #[cfg(feature = "expose-metrics")]
 use prometheus::{HistogramOpts, HistogramVec, Registry, TextEncoder, Encoder};
+use twilight_http::request::Method;
 
 #[cfg(feature = "expose-metrics")]
 lazy_static! {
@@ -174,13 +175,14 @@ async fn handle_request(
         headers,
         ..
     } = parts;
+    let converted_method = convert_method(method.clone())?;
 
     let trimmed_path = if uri.path().starts_with(&api_url) {
         uri.path().replace(&api_url, "")
     } else {
         uri.path().to_owned()
     };
-    let path = Path::try_from((method.clone(), trimmed_path.as_ref())).context(InvalidPath)?;
+    let path = Path::try_from((converted_method, trimmed_path.as_ref())).context(InvalidPath)?;
 
     let bytes = (hyper::body::to_bytes(body).await.context(ChunkingRequest)?).to_vec();
 
@@ -194,12 +196,12 @@ async fn handle_request(
     };
     let body = if bytes.is_empty() { None } else { Some(bytes) };
     let p = path_name(&path);
-    let m = method.to_string();
+    let m = method.as_str();
     let raw_request = TwilightRequest {
         body,
         form: None,
         headers: Some(headers),
-        method,
+        method: converted_method,
         path,
         path_str: path_and_query,
     };
@@ -216,12 +218,23 @@ async fn handle_request(
 
     #[cfg(feature = "expose-metrics")]
     HISTOGRAM
-        .with_label_values(&[m.as_str(), p, resp.status().to_string().as_str()])
+        .with_label_values(&[m, p, resp.status().to_string().as_str()])
         .observe((end - start).as_secs_f64());
 
     debug!("{} {}: {}", m, p, resp.status());
 
     Ok(resp)
+}
+
+fn convert_method(method: http::Method) -> Result<Method, RequestError> {
+    match method {
+        http::Method::DELETE => Ok(Method::Delete),
+        http::Method::GET => Ok(Method::Get),
+        http::Method::PATCH => Ok(Method::Patch),
+        http::Method::POST => Ok(Method::Post),
+        http::Method::PUT => Ok(Method::Put),
+        other => Err(RequestError::MethodNotAllowed { method: String::from(other.as_str()) })
+    }
 }
 
 #[cfg(feature = "expose-metrics")]

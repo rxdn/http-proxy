@@ -9,6 +9,7 @@ pub enum RequestError {
     ChunkingRequest { source: HyperError },
     InvalidPath { source: PathParseError },
     MakingResponseBody { source: HttpError },
+    MethodNotAllowed { method: String },
     NoPath { uri: Uri },
     RequestIssue { source: TwilightError },
 }
