@@ -6,6 +6,7 @@ version = "0.1.0"
 
 [dependencies]
 twilight-http = { git = "https://github.com/rxdn/twilight/", branch = "api-v9", default-features = false, features = ["rustls"] }
+twilight-model = "0.4.2"
 hyper = { version = "0.14", features = ["tcp", "server", "http1", "http2"] }
 http = "0.2"
 tracing = "0.1"
@@ -13,6 +14,8 @@ tracing-subscriber = { version = "0.2", features = ["fmt", "registry"] }
 tracing-log = "0.1"
 snafu = "0.6"
 tokio = { version = "1.0", features = ["rt", "rt-multi-thread", "macros"] }
+parking_lot = "0.11"
+base64 = "0.13"
 
 # Only used by the `expose-metrics` feature.
 prometheus = { version = "0.11", optional = true }

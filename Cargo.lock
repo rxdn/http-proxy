@@ -1049,16 +1049,18 @@ dependencies = [
  "serde_repr",
  "tokio",
  "tracing",
- "twilight-model",
+ "twilight-model 0.3.5",
 ]
 
 [[package]]
 name = "twilight-http-proxy"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "http",
  "hyper",
  "lazy_static",
+ "parking_lot",
  "prometheus",
  "snafu",
  "tokio",
@@ -1066,12 +1068,26 @@ dependencies = [
  "tracing-log",
  "tracing-subscriber",
  "twilight-http",
+ "twilight-model 0.4.2",
 ]
 
 [[package]]
 name = "twilight-model"
 version = "0.3.5"
 source = "git+https://github.com/rxdn/twilight/?branch=api-v9#4b71ef9134b89cea6c32c3cd236acccb2d30a0a8"
+dependencies = [
+ "bitflags",
+ "serde",
+ "serde-value",
+ "serde_repr",
+ "tracing",
+]
+
+[[package]]
+name = "twilight-model"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18ecfebe70da0f80063a199f69e7e4ede6cc21c69dd9d7e5ede2e6f1fa52d9d6"
 dependencies = [
  "bitflags",
  "serde",

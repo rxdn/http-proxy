@@ -1,6 +1,6 @@
 mod error;
 
-use error::{ChunkingRequest, InvalidPath, RequestError, RequestIssue};
+use error::{ChunkingRequest, InvalidPath, RequestError, RequestIssue, Base64Error, EncodingError, ParseError};
 use http::request::Parts;
 use hyper::{
     body::Body,
@@ -14,6 +14,7 @@ use std::{
     error::Error,
     net::{IpAddr, SocketAddr},
     str::FromStr,
+    collections::HashMap,
 };
 use tracing::{debug, error, info, trace};
 use tracing_log::LogTracer;
@@ -31,6 +32,10 @@ use lazy_static::lazy_static;
 #[cfg(feature = "expose-metrics")]
 use prometheus::{HistogramOpts, HistogramVec, Registry, TextEncoder, Encoder};
 use twilight_http::request::Method;
+use twilight_model::id::UserId;
+use std::sync::Arc;
+use parking_lot::Mutex;
+use std::str;
 
 #[cfg(feature = "expose-metrics")]
 lazy_static! {
@@ -63,36 +68,36 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let host = IpAddr::from_str(&host_raw)?;
     let port = env::var("PORT").unwrap_or_else(|_| "80".into()).parse()?;
 
-    let client = Client::new(env::var("DISCORD_TOKEN")?);
+    let clients: Arc<Mutex<HashMap<UserId, Client>>> = Arc::new(Mutex::new(HashMap::new()));
 
     let address = SocketAddr::from((host, port));
 
     #[cfg(feature = "expose-metrics")]
-    REGISTRY.register(Box::new(HISTOGRAM.clone()))?;
+        REGISTRY.register(Box::new(HISTOGRAM.clone()))?;
 
     // The closure inside `make_service_fn` is run for each connection,
     // creating a 'service' to handle requests for that specific connection.
     let service = service::make_service_fn(move |addr: &AddrStream| {
         debug!("Connection from: {:?}", addr);
-        let client = client.clone();
+        let clients = Arc::clone(&clients);
 
         async move {
             Ok::<_, RequestError>(service::service_fn(move |incoming: Request<Body>| {
                 #[cfg(feature = "expose-metrics")]
-                {
-                    let uri = incoming.uri();
+                    {
+                        let uri = incoming.uri();
 
-                    if uri.path() == "/metrics" {
-                        handle_metrics()
-                    } else {
-                        Box::pin(handle_request(client.clone(), incoming))
+                        if uri.path() == "/metrics" {
+                            handle_metrics()
+                        } else {
+                            Box::pin(handle_request(Arc::clone(&clients), incoming))
+                        }
                     }
-                }
 
                 #[cfg(not(feature = "expose-metrics"))]
-                {
-                    handle_request(client.clone(), incoming)
-                }
+                    {
+                        handle_request(Arc::clone(&clients), incoming)
+                    }
             }))
         }
     });
@@ -162,7 +167,7 @@ fn path_name(path: &Path) -> &'static str {
 }
 
 async fn handle_request(
-    client: Client,
+    clients: Arc<Mutex<HashMap<UserId, Client>>>,
     request: Request<Body>,
 ) -> Result<Response<Body>, RequestError> {
     let api_url: String = format!("/api/v{}/", API_VERSION);
@@ -186,6 +191,22 @@ async fn handle_request(
 
     let bytes = (hyper::body::to_bytes(body).await.context(ChunkingRequest)?).to_vec();
 
+    // Find bot id
+    // TODO: Better error handling
+    let mut token = match headers.get("Authorization").map(|a| a.to_str().ok()).flatten() {
+        Some(v) => v,
+        None => return Err(RequestError::MissingAuthorization),
+    }.to_owned();
+
+    // Can never be None
+    if token.starts_with("Bot ") {
+        token = token[4..].to_owned();
+    }
+
+    let id_b64 = token.split(".").next().unwrap();
+    let id_bytes = base64::decode(id_b64).context(Base64Error)?;
+    let bot_id = UserId(str::from_utf8(&id_bytes[..]).context(EncodingError)?.parse().context(ParseError)?);
+
     let path_and_query = match uri.path_and_query() {
         Some(v) => v.as_str().replace(&api_url, "").into(),
         None => {
@@ -207,17 +228,23 @@ async fn handle_request(
     };
 
     #[cfg(feature = "expose-metrics")]
-    let start = Instant::now();
+        let start = Instant::now();
+
+    let client: Client;
+    {
+        let mut clients = clients.lock();
+        client = get_client(bot_id, token.as_str(), &mut *clients);
+    }
 
     let resp = client.raw(raw_request).await.context(RequestIssue)?;
 
     #[cfg(feature = "expose-metrics")]
-    let end = Instant::now();
+        let end = Instant::now();
 
     trace!("Response: {:?}", resp);
 
     #[cfg(feature = "expose-metrics")]
-    HISTOGRAM
+        HISTOGRAM
         .with_label_values(&[m, p, resp.status().to_string().as_str()])
         .observe((end - start).as_secs_f64());
 
@@ -237,8 +264,19 @@ fn convert_method(method: http::Method) -> Result<Method, RequestError> {
     }
 }
 
+fn get_client(bot_id: UserId, token: &str, clients: &mut HashMap<UserId, Client>) -> Client {
+    match clients.get(&bot_id) {
+        Some(v) => v.clone(),
+        None => {
+            let client = Client::new(token);
+            clients.insert(bot_id, client.clone());
+            client
+        }
+    }
+}
+
 #[cfg(feature = "expose-metrics")]
-fn handle_metrics() -> Pin<Box<dyn Future<Output = Result<Response<Body>, RequestError>> + Send>> {
+fn handle_metrics() -> Pin<Box<dyn Future<Output=Result<Response<Body>, RequestError>> + Send>> {
     Box::pin(async move {
         let mut buffer = Vec::new();
 
@@ -248,7 +286,7 @@ fn handle_metrics() -> Pin<Box<dyn Future<Output = Result<Response<Body>, Reques
             return Ok(Response::builder()
                 .status(500)
                 .body(Body::from(format!("{:?}", e)))
-                .unwrap())
+                .unwrap());
         }
 
         match String::from_utf8(buffer) {
