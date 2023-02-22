@@ -1003,8 +1003,9 @@ dependencies = [
 
 [[package]]
 name = "twilight-http-ratelimiting"
-version = "0.13.0"
-source = "git+https://github.com/rxdn/twilight?branch=rxdn-patch-1#9232a72a617dd20735cdee7e525ac256e5d784e7"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae0f4e41de074648bea638d34ff6448a36d07f0e9723f7c2716a3d35d0459082"
 dependencies = [
  "futures-util",
  "http",
