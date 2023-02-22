@@ -313,6 +313,10 @@ async fn handle_request(
         HeaderValue::from_bytes(token.as_bytes())
             .expect("strings are guaranteed to be valid utf-8"),
     );
+
+    let h = HeaderValue::from_bytes(token.as_bytes()).expect("strings are guaranteed to be valid utf-8");
+    println!("{:?}", h);
+
     request
         .headers_mut()
         .insert(HOST, HeaderValue::from_static("discord.com"));
